@@ -32,6 +32,7 @@ void bench_timer_print()
 }
 
 #define MAXSIZE 5
+#define CHECKPOINT_STEP 1
 float Matrix[MAXSIZE][MAXSIZE];
 float MatrixCopy[MAXSIZE][MAXSIZE];
 
@@ -172,101 +173,101 @@ int main()
 
   
     if ( status[rank] != 0){
-      
-      // Синхронизация матриц
-
-      // Шаг первый соберем все строки в корневои процессе
-      if (worklist[i] == rank){
-        for (int k = 0; k < MAXSIZE; k++){
-          if ( worklist[k] != rank ){
-            MPI_Recv(Matrix[k], MAXSIZE, MPI_FLOAT ,worklist[k], 20, MPI_COMM_WORLD, NULL); 
+      if ( i % CHECKPOINT_STEP == 0 ){
+        // Синхронизация матриц
+        // Шаг первый соберем все строки в корневои процессе
+        if (worklist[i] == rank){
+          for (int k = 0; k < MAXSIZE; k++){
+            if ( worklist[k] != rank ){
+              MPI_Recv(Matrix[k], MAXSIZE, MPI_FLOAT ,worklist[k], 20, MPI_COMM_WORLD, NULL); 
+            }
           }
-        }
-      } else {
-        for (int z = 0; z < MAXSIZE; z++){
-          if ( worklist[z] == rank){
-            MPI_Send(Matrix[z], MAXSIZE, MPI_FLOAT, worklist[i], 20, MPI_COMM_WORLD);
-          }
-        } 
-      }
-
-      // Шаг второй передадим матрицу всем не корневым процессам
-      for (int j = 0; j < MAXSIZE; j++)
-      {
-        if (worklist[i] == rank)
-        {
-          for (int k = 0; k < count; k++)
-          {
-            if( k!=worklist[i] && status[k]!=0){
-               MPI_Send(Matrix[j], MAXSIZE, MPI_FLOAT, k, 21, MPI_COMM_WORLD);
+        } else {
+          for (int z = 0; z < MAXSIZE; z++){
+            if ( worklist[z] == rank){
+              MPI_Send(Matrix[z], MAXSIZE, MPI_FLOAT, worklist[i], 20, MPI_COMM_WORLD);
             }
           } 
-        } else {
-          MPI_Recv(Matrix[j], MAXSIZE, MPI_FLOAT ,worklist[i], 21, MPI_COMM_WORLD, NULL); 
         }
-      }
-
-      //if(rank==0 && real_iter==6){PrintMatrix(Matrix,0,MAXSIZE-1);}
-      
-      // Теперь сохраним строки, которые потенциально может изменить
-      // текущий процесс в MatrixCopy
-
-      for (int j = 0; j < MAXSIZE; j++)
-      {
-        if ( worklist[j]==rank){
-          ReplaceRow(MatrixCopy[j],Matrix[j],MAXSIZE);
-        }
-      }
-      
-
-      //if(rank==0 && real_iter==1){PrintMatrix(Matrix,0,MAXSIZE-1);}
-  
-      // т.е в копии матрицы каждого процесса лежат строки, которые будут изменятся
-      // пи сбоем нам необходимо восстановить эти строки у каждого процесса
-
-      // Хочется чтобы на момент чекпоинта все процессы имели общий minus
-      // Необходимо для конечных вычислений
-      // Погибнуть может любой => каждый должен иметь все реальные минусы
-      // Идея корневой процесс должен получить со всех
-      // Далее корневой процесс должен отправить всем
-      // Пусть корневой процесс worklist[i], status[worklist[i]] != 0  
-      // В силу построения  worklist и в силу локальности мест сбоя
-      
-      // Part one - All to Root
-        if ( rank == worklist[i]){
-          int tmp_minus[MAXSIZE] = {0};
-          for (int z = 0; z < count; z++)
+        // Шаг второй передадим матрицу всем не корневым процессам
+        for (int j = 0; j < MAXSIZE; j++)
+        {
+          if (worklist[i] == rank)
           {
-            if ( status[z] != 0 && z != rank){
-              //printf("IWANT %d\n",z);
-              MPI_Recv(tmp_minus, MAXSIZE, MPI_INT,z, 2, MPI_COMM_WORLD, NULL); 
-              for (int i = 0; i < MAXSIZE; i++)
-              {
-                minus[i] = tmp_minus[i] == 0 ? minus[i] : tmp_minus[i];
-              }  
+            for (int k = 0; k < count; k++)
+            {
+              if( k!=worklist[i] && status[k]!=0){
+                MPI_Send(Matrix[j], MAXSIZE, MPI_FLOAT, k, 21, MPI_COMM_WORLD);
+              }
+            } 
+          } else {
+            MPI_Recv(Matrix[j], MAXSIZE, MPI_FLOAT ,worklist[i], 21, MPI_COMM_WORLD, NULL); 
+          }
+        }
+
+        //if(rank==0 && real_iter==6){PrintMatrix(Matrix,0,MAXSIZE-1);}
+        
+        // Теперь сохраним строки, которые потенциально может изменить
+        // текущий процесс в MatrixCopy
+
+        for (int j = 0; j < MAXSIZE; j++)
+        {
+          if ( worklist[j]==rank){
+            ReplaceRow(MatrixCopy[j],Matrix[j],MAXSIZE);
+          }
+        }
+        
+
+        //if(rank==0 && real_iter==0){PrintMatrix(Matrix,0,MAXSIZE-1);}
+    
+        // т.е в копии матрицы каждого процесса лежат строки, которые будут изменятся
+        // пи сбоем нам необходимо восстановить эти строки у каждого процесса
+
+        // Хочется чтобы на момент чекпоинта все процессы имели общий minus
+        // Необходимо для конечных вычислений
+        // Погибнуть может любой => каждый должен иметь все реальные минусы
+        // Идея корневой процесс должен получить со всех
+        // Далее корневой процесс должен отправить всем
+        // Пусть корневой процесс worklist[i], status[worklist[i]] != 0  
+        // В силу построения  worklist и в силу локальности мест сбоя
+        
+        // Part one - All to Root
+          if ( rank == worklist[i]){
+            int tmp_minus[MAXSIZE] = {0};
+            for (int z = 0; z < count; z++)
+            {
+              if ( status[z] != 0 && z != rank){
+                //printf("IWANT %d\n",z);
+                MPI_Recv(tmp_minus, MAXSIZE, MPI_INT,z, 2, MPI_COMM_WORLD, NULL); 
+                for (int i = 0; i < MAXSIZE; i++)
+                {
+                  minus[i] = tmp_minus[i] == 0 ? minus[i] : tmp_minus[i];
+                }  
+              }
+            }
+          } else {
+            if (status[rank]!=0){
+              //printf("ISEND %d\n",rank);
+              MPI_Send(minus, MAXSIZE, MPI_INT, worklist[i], 2, MPI_COMM_WORLD);
             }
           }
-        } else {
-          if (status[rank]!=0){
-            //printf("ISEND %d\n",rank);
-            MPI_Send(minus, MAXSIZE, MPI_INT, worklist[i], 2, MPI_COMM_WORLD);
+        // Part two - root to all with replace
+          if ( rank == worklist[i]){
+            for (int z = 0; z < count; z++)
+            {
+              if ( status[z] != 0 && z != rank){
+                MPI_Send(minus, MAXSIZE, MPI_INT, z, 3, MPI_COMM_WORLD);
+              }     
+            }
+          } else {
+            if (status[rank]!=0){
+              //printf("ISEND %d\n",rank);
+              MPI_Recv(minus, MAXSIZE, MPI_INT,worklist[i], 3, MPI_COMM_WORLD, NULL); 
+            }
           }
-        }
-      // Part two - root to all with replace
-        if ( rank == worklist[i]){
-          for (int z = 0; z < count; z++)
-          {
-            if ( status[z] != 0 && z != rank){
-              MPI_Send(minus, MAXSIZE, MPI_INT, z, 3, MPI_COMM_WORLD);
-            }     
-          }
-        } else {
-          if (status[rank]!=0){
-            //printf("ISEND %d\n",rank);
-            MPI_Recv(minus, MAXSIZE, MPI_INT,worklist[i], 3, MPI_COMM_WORLD, NULL); 
-          }
-        }
-      // END SAVEPOINT
+        // END SAVEPOINT
+    }
+
 
       // Config OUR matrix
       if (rank == worklist[i])
@@ -354,102 +355,107 @@ int main()
         }
       }
     }
-    //  BEGIN BREAKPOINT
-      int* ttmp = malloc(count * sizeof(int));
-      for (int i = 0; i < count; i++)
-      {
-        ttmp[i] = my_status;
-      } 
-      //printf("IWANT %d ITER %d\n",rank,real_iter);
-      MPI_Alltoall(ttmp,1,MPI_INT,status,1,MPI_INT,MPI_COMM_WORLD);
-      free(ttmp);
-      // Необходимо синхронизировать кол-во ответов у сломанных процессов
-      if ( status[rank] == 0 ){
-        int tmp = 0;
-        for (int k = 0; k < count; k++)
+
+    if ( (i % CHECKPOINT_STEP) == (CHECKPOINT_STEP-1)){
+      //  BEGIN BREAKPOINT
+        int* ttmp = malloc(count * sizeof(int));
+        for (int i = 0; i < count; i++)
         {
-          tmp = status[k] + tmp;
-        }
-        tmp = count - tmp;
-        if ( tmp != broken ){
-          broken = tmp;
-          i = i - 1;  
-        }
-      }
-    // BEGIN RECOVERY
-    if ( status[rank] != 0){
-      // COUNTING NUMBER OF BROKE
-        int tmp = 0;
-        for (int k = 0; k < count; k++)
-        {
-          tmp = status[k] + tmp;
-        }
-        tmp = count - tmp;
-        // IF BROKE ANOTHER ONE...
+          ttmp[i] = my_status;
+        } 
+        //printf("IWANT %d ITER %d\n",rank,real_iter);
+        MPI_Alltoall(ttmp,1,MPI_INT,status,1,MPI_INT,MPI_COMM_WORLD);
+        free(ttmp);
+        // Необходимо синхронизировать кол-во ответов у сломанных процессов
+        if ( status[rank] == 0 ){
+          int tmp = 0;
+          for (int k = 0; k < count; k++)
+          {
+            tmp = status[k] + tmp;
+          }
+          tmp = count - tmp;
           if ( tmp != broken ){
             broken = tmp;
-            // Отменим все вычисления минуса, которые мы сделали
-            if ( rank == worklist[i]){
-              for (int h = 0; h < count; h++)
-              {
-                if ( minus[h] == (i + 1) ){
-                  minus[h] = 0;
-                }
-              }
-            }
-            // Вернем вернем матрицу из копии сделаем шаг назад
-              i = i - 1;
-              for (int z = 0; z < MAXSIZE; z++)
-              {
-                if ( worklist[z] == rank ){
-                  ReplaceRow(Matrix[z],MatrixCopy[z],MAXSIZE);
-                }
-              }
-            // Пересчитаем worklist для каждого процесса
-            if ( tmp == count){
-              printf("ALL_PROCESS_DIE!!!!!\n");
-              break;
-            } else {
-              for (int k = 0; k < MAXSIZE; k++)
-              {
-                if ( 0 == status[worklist[k]]){
-                  while(status[small] == 0){
-                    small = (small + 1)%count;
-                  }
-                  worklist[k] = small;
-                  small = (small + 1)%count;   
-                }
-              }
-            }
-          } 
-          // printf("I %d,br_count %d,iteration %d, my_status: %d, status: ",rank,tmp,real_iter,my_status);
-          // for (int i = 0; i < count; i++)
-          // {
-          //   printf(" %d ",status[i]);
-          // }
-          // printf("\t");
-          // printf("worklist: ");
-          // for (int i = 0; i < MAXSIZE; i++)
-          // {
-          //   printf(" %d ",worklist[i]);
-          // }
-          // printf("\n");
-
-
-      if( rank == worklist[i]){
-        for (int i = 0; i < MAXSIZE; i++)
-          {
-            printf(" %d ",worklist[i]);
+            i = i - 1;  
           }
-          printf(" __ %d \n",real_iter);
+        }
+      // BEGIN RECOVERY
+      if ( status[rank] != 0){
+        // COUNTING NUMBER OF BROKE
+          int tmp = 0;
+          for (int k = 0; k < count; k++)
+          {
+            tmp = status[k] + tmp;
+          }
+          tmp = count - tmp;
+          // IF BROKE ANOTHER ONE...
+            if ( tmp != broken ){
+              broken = tmp;
+              // Отменим все вычисления минуса, которые мы сделали
+              if ( rank == worklist[i]){
+                for (int h = 0; h < count; h++)
+                {
+                  if ( minus[h] == (i + 1) ){
+                    minus[h] = 0;
+                  }
+                }
+              }
+              // Вернем вернем матрицу из копии сделаем шаг назад
+                i = i - CHECKPOINT_STEP;
+                for (int z = 0; z < MAXSIZE; z++)
+                {
+                  if ( worklist[z] == rank ){
+                    ReplaceRow(Matrix[z],MatrixCopy[z],MAXSIZE);
+                  }
+                }
+              // Пересчитаем worklist для каждого процесса
+              if ( tmp == count){
+                printf("ALL_PROCESS_DIE!!!!!\n");
+                break;
+              } else {
+                for (int k = 0; k < MAXSIZE; k++)
+                {
+                  if ( 0 == status[worklist[k]]){
+                    while(status[small] == 0){
+                      small = (small + 1)%count;
+                    }
+                    worklist[k] = small;
+                    small = (small + 1)%count;   
+                  }
+                }
+              }
+            } 
+            // printf("I %d,br_count %d,iteration %d, my_status: %d, status: ",rank,tmp,real_iter,my_status);
+            // for (int i = 0; i < count; i++)
+            // {
+            //   printf(" %d ",status[i]);
+            // }
+            // printf("\t");
+            // printf("worklist: ");
+            // for (int i = 0; i < MAXSIZE; i++)
+            // {
+            //   printf(" %d ",worklist[i]);
+            // }
+            // printf("\n");
+
+
       }
+
+      //  END RECOVERY
+      //  END BREAKPOINT
     }
 
-    //  END RECOVERY
-    //  END BREAKPOINT
-
+        if( rank == worklist[i] && status[rank] != 0){
+          for (int i = 0; i < MAXSIZE; i++)
+            {
+              printf(" %d ",worklist[i]);
+            }
+            printf(" __ %d \n",real_iter);
+        }
     //if(rank==0){PrintMatrix(Matrix,0,MAXSIZE-1);}
   }
+
+  //printf("EXCELENT %d \n",rank);
 
   // Теперь мы не знаем какие процессы живы
   // Выбираем живой процесс с наименьшим рангом 
